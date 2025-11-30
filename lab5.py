@@ -581,11 +581,47 @@ class MainWindow(QtWidgets.QMainWindow):
         # Отображаем Ишимоку, если выбран
         if self.display_ichimoku:
             ichimoku = compute_ichimoku(df)
-            ax_main.plot(df.index, ichimoku["Tenkan-sen"], label="Tenkan-sen", color='blue')
-            ax_main.plot(df.index, ichimoku["Kijun-sen"], label="Kijun-sen", color='red')
-            ax_main.plot(df.index, ichimoku["Senkou Span A"], label="Senkou Span A", color='green')
-            ax_main.plot(df.index, ichimoku["Senkou Span B"], label="Senkou Span B", color='orange')
-            ax_main.plot(df.index, ichimoku["Chikou Span"], label="Chikou Span", color='purple')
+            ichimoku_df = pd.DataFrame(ichimoku).reindex(df.index)
+
+            tenkan = ichimoku_df["Tenkan-sen"]
+            kijun = ichimoku_df["Kijun-sen"]
+            span_a = ichimoku_df["Senkou Span A"]
+            span_b = ichimoku_df["Senkou Span B"]
+            chikou = ichimoku_df["Chikou Span"]
+
+            ax_main.plot(df.index, tenkan, label="Tenkan-sen", color="blue", linewidth=1.1)
+            ax_main.plot(df.index, kijun, label="Kijun-sen", color="red", linewidth=1.1)
+
+            valid_mask = ~(span_a.isna() | span_b.isna())
+            bull_mask = valid_mask & (span_a >= span_b)
+            bear_mask = valid_mask & (span_a < span_b)
+
+            ax_main.fill_between(
+                df.index,
+                span_a,
+                span_b,
+                where=bull_mask,
+                color="#F0B27A",
+                alpha=0.35,
+                interpolate=True,
+                label="Kumo (A>B)",
+            )
+            ax_main.fill_between(
+                df.index,
+                span_a,
+                span_b,
+                where=bear_mask,
+                color="#BB8FCE",
+                alpha=0.35,
+                interpolate=True,
+                label="Kumo (B>A)",
+            )
+
+            ax_main.plot(df.index, span_a, label="Senkou Span A", color="green", linewidth=1)
+            ax_main.plot(df.index, span_b, label="Senkou Span B", color="orange", linewidth=1)
+            ax_main.plot(df.index, chikou, label="Chikou Span", color="purple", linewidth=1)
+
+            ax_main.legend(loc="upper left")
 
         # ---- отфильтрованные по видимому участку паттерны ----
         visible_index = df.index
