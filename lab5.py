@@ -355,31 +355,28 @@ def compute_all_patterns(df: pd.DataFrame) -> PatternResults:
 # ---------------- ИШИМОКУ ---------------- #
 def compute_ichimoku(df: pd.DataFrame) -> dict:
     """Вычисление линий Ишимоку."""
-    # Tenkan-sen (Conversion Line)
-    tenkan_sen = (df["High"].rolling(window=9).max() + df["Low"].rolling(window=9).min()) / 2
-    
-    # Kijun-sen (Base Line)
-    kijun_sen = (df["High"].rolling(window=26).max() + df["Low"].rolling(window=26).min()) / 2
-    
-    # Senkou Span A (Leading Span A)
+    df_sorted = df.sort_index()
+
+    def _midpoint(high: pd.Series, low: pd.Series, window: int) -> pd.Series:
+        """Средняя точка диапазона за окно с полным количеством данных."""
+        rolling_high = high.rolling(window=window, min_periods=window).max()
+        rolling_low = low.rolling(window=window, min_periods=window).min()
+        return (rolling_high + rolling_low) / 2
+
+    tenkan_sen = _midpoint(df_sorted["High"], df_sorted["Low"], 9)
+    kijun_sen = _midpoint(df_sorted["High"], df_sorted["Low"], 26)
+
     senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(26)
-    
-    # Senkou Span B (Leading Span B)
-    senkou_span_b = ((df["High"].rolling(window=52).max() + df["Low"].rolling(window=52).min()) / 2).shift(26)
-    
-    # Chikou Span (Lagging Span)
-    chikou_span = df["Close"].shift(-26)
-    
-    # Собираем все линии в словарь
-    ichimoku = {
+    senkou_span_b = _midpoint(df_sorted["High"], df_sorted["Low"], 52).shift(26)
+    chikou_span = df_sorted["Close"].shift(-26)
+
+    return {
         "Tenkan-sen": tenkan_sen,
         "Kijun-sen": kijun_sen,
         "Senkou Span A": senkou_span_a,
         "Senkou Span B": senkou_span_b,
-        "Chikou Span": chikou_span
+        "Chikou Span": chikou_span,
     }
-    
-    return ichimoku
 
 
 # ---------------- GUI ---------------- #
@@ -584,11 +581,47 @@ class MainWindow(QtWidgets.QMainWindow):
         # Отображаем Ишимоку, если выбран
         if self.display_ichimoku:
             ichimoku = compute_ichimoku(df)
-            ax_main.plot(df.index, ichimoku["Tenkan-sen"], label="Tenkan-sen", color='blue')
-            ax_main.plot(df.index, ichimoku["Kijun-sen"], label="Kijun-sen", color='red')
-            ax_main.plot(df.index, ichimoku["Senkou Span A"], label="Senkou Span A", color='green')
-            ax_main.plot(df.index, ichimoku["Senkou Span B"], label="Senkou Span B", color='orange')
-            ax_main.plot(df.index, ichimoku["Chikou Span"], label="Chikou Span", color='purple')
+            ichimoku_df = pd.DataFrame(ichimoku).reindex(df.index)
+
+            tenkan = ichimoku_df["Tenkan-sen"]
+            kijun = ichimoku_df["Kijun-sen"]
+            span_a = ichimoku_df["Senkou Span A"]
+            span_b = ichimoku_df["Senkou Span B"]
+            chikou = ichimoku_df["Chikou Span"]
+
+            ax_main.plot(df.index, tenkan, label="Tenkan-sen", color="blue", linewidth=1.1)
+            ax_main.plot(df.index, kijun, label="Kijun-sen", color="red", linewidth=1.1)
+
+            valid_mask = ~(span_a.isna() | span_b.isna())
+            bull_mask = valid_mask & (span_a >= span_b)
+            bear_mask = valid_mask & (span_a < span_b)
+
+            ax_main.fill_between(
+                df.index,
+                span_a,
+                span_b,
+                where=bull_mask,
+                color="#F0B27A",
+                alpha=0.35,
+                interpolate=True,
+                label="Kumo (A>B)",
+            )
+            ax_main.fill_between(
+                df.index,
+                span_a,
+                span_b,
+                where=bear_mask,
+                color="#BB8FCE",
+                alpha=0.35,
+                interpolate=True,
+                label="Kumo (B>A)",
+            )
+
+            ax_main.plot(df.index, span_a, label="Senkou Span A", color="green", linewidth=1)
+            ax_main.plot(df.index, span_b, label="Senkou Span B", color="orange", linewidth=1)
+            ax_main.plot(df.index, chikou, label="Chikou Span", color="purple", linewidth=1)
+
+            ax_main.legend(loc="upper left")
 
         # ---- отфильтрованные по видимому участку паттерны ----
         visible_index = df.index
