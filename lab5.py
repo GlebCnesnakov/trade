@@ -355,31 +355,28 @@ def compute_all_patterns(df: pd.DataFrame) -> PatternResults:
 # ---------------- ИШИМОКУ ---------------- #
 def compute_ichimoku(df: pd.DataFrame) -> dict:
     """Вычисление линий Ишимоку."""
-    # Tenkan-sen (Conversion Line)
-    tenkan_sen = (df["High"].rolling(window=9).max() + df["Low"].rolling(window=9).min()) / 2
-    
-    # Kijun-sen (Base Line)
-    kijun_sen = (df["High"].rolling(window=26).max() + df["Low"].rolling(window=26).min()) / 2
-    
-    # Senkou Span A (Leading Span A)
+    df_sorted = df.sort_index()
+
+    def _midpoint(high: pd.Series, low: pd.Series, window: int) -> pd.Series:
+        """Средняя точка диапазона за окно с полным количеством данных."""
+        rolling_high = high.rolling(window=window, min_periods=window).max()
+        rolling_low = low.rolling(window=window, min_periods=window).min()
+        return (rolling_high + rolling_low) / 2
+
+    tenkan_sen = _midpoint(df_sorted["High"], df_sorted["Low"], 9)
+    kijun_sen = _midpoint(df_sorted["High"], df_sorted["Low"], 26)
+
     senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(26)
-    
-    # Senkou Span B (Leading Span B)
-    senkou_span_b = ((df["High"].rolling(window=52).max() + df["Low"].rolling(window=52).min()) / 2).shift(26)
-    
-    # Chikou Span (Lagging Span)
-    chikou_span = df["Close"].shift(-26)
-    
-    # Собираем все линии в словарь
-    ichimoku = {
+    senkou_span_b = _midpoint(df_sorted["High"], df_sorted["Low"], 52).shift(26)
+    chikou_span = df_sorted["Close"].shift(-26)
+
+    return {
         "Tenkan-sen": tenkan_sen,
         "Kijun-sen": kijun_sen,
         "Senkou Span A": senkou_span_a,
         "Senkou Span B": senkou_span_b,
-        "Chikou Span": chikou_span
+        "Chikou Span": chikou_span,
     }
-    
-    return ichimoku
 
 
 # ---------------- GUI ---------------- #
