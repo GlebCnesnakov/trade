@@ -385,8 +385,11 @@ class MplCanvas(FigureCanvas):
     def __init__(self, parent=None):
         fig = Figure(figsize=(10, 6))
         self.figure = fig
-        self.axes_main = fig.add_axes([0.05, 0.35, 0.9, 0.6])
-        self.axes_rsi = fig.add_axes([0.05, 0.1, 0.9, 0.2], sharex=self.axes_main)
+        self.axes_main = fig.add_axes([0.05, 0.42, 0.9, 0.55])
+        self.axes_alligator = fig.add_axes(
+            [0.05, 0.23, 0.9, 0.15], sharex=self.axes_main
+        )
+        self.axes_rsi = fig.add_axes([0.05, 0.05, 0.9, 0.13], sharex=self.axes_main)
         super().__init__(fig)
         self.setParent(parent)
 
@@ -540,7 +543,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("Ошибка загрузки данных")
 
     def draw_chart(self, highlight_key: Optional[str] = None):
-        """Рисуем свечи + RSI + Ишимоку. При необходимости подсвечиваем паттерны."""
+        """Рисуем свечи + RSI + Аллигатор/Ишимоку. При необходимости подсвечиваем паттерны."""
         if self.df is None:
             return
 
@@ -548,9 +551,11 @@ class MainWindow(QtWidgets.QMainWindow):
         df = self.df.tail(180).copy()
 
         ax_main = self.canvas.axes_main
+        ax_alligator = self.canvas.axes_alligator
         ax_rsi = self.canvas.axes_rsi
 
         ax_main.clear()
+        ax_alligator.clear()
         ax_rsi.clear()
 
         # свечи
@@ -567,16 +572,30 @@ class MainWindow(QtWidgets.QMainWindow):
         ax_main.grid(True)
 
         xleft, xright = ax_main.get_xlim()
+        x_index = df.index
 
         # RSI
         rsi = df["RSI"]
-        x = np.arange(len(df))
-        ax_rsi.plot(x, rsi.values, linewidth=1)
+        ax_rsi.plot(x_index, rsi.values, linewidth=1)
         ax_rsi.axhline(70, linestyle="--", linewidth=0.8)
         ax_rsi.axhline(30, linestyle="--", linewidth=0.8)
         ax_rsi.set_ylabel("RSI")
         ax_rsi.grid(True)
         ax_rsi.set_xlim(xleft, xright)
+
+        # Аллигатор
+        alligator = pd.DataFrame(compute_alligator(df)).reindex(df.index)
+        ax_alligator.plot(x_index, alligator["Jaw"], label="Jaw (13, +8)", color="blue")
+        ax_alligator.plot(
+            x_index, alligator["Teeth"], label="Teeth (8, +5)", color="red"
+        )
+        ax_alligator.plot(
+            x_index, alligator["Lips"], label="Lips (5, +3)", color="green"
+        )
+        ax_alligator.set_ylabel("Alligator")
+        ax_alligator.grid(True)
+        ax_alligator.legend(loc="upper left", fontsize=8)
+        ax_alligator.set_xlim(xleft, xright)
 
         # Отображаем Ишимоку, если выбран
         if self.display_ichimoku:
