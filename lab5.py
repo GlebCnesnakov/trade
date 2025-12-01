@@ -355,31 +355,43 @@ def compute_all_patterns(df: pd.DataFrame) -> PatternResults:
 # ---------------- ИШИМОКУ ---------------- #
 def compute_ichimoku(df: pd.DataFrame) -> dict:
     """Вычисление линий Ишимоку."""
-    # Tenkan-sen (Conversion Line)
-    tenkan_sen = (df["High"].rolling(window=9).max() + df["Low"].rolling(window=9).min()) / 2
-    
-    # Kijun-sen (Base Line)
-    kijun_sen = (df["High"].rolling(window=26).max() + df["Low"].rolling(window=26).min()) / 2
-    
-    # Senkou Span A (Leading Span A)
+    df_sorted = df.sort_index()
+
+    def _midpoint(high: pd.Series, low: pd.Series, window: int) -> pd.Series:
+        """Средняя точка диапазона за окно с полным количеством данных."""
+        rolling_high = high.rolling(window=window, min_periods=window).max()
+        rolling_low = low.rolling(window=window, min_periods=window).min()
+        return (rolling_high + rolling_low) / 2
+
+    tenkan_sen = _midpoint(df_sorted["High"], df_sorted["Low"], 9)
+    kijun_sen = _midpoint(df_sorted["High"], df_sorted["Low"], 26)
+
     senkou_span_a = ((tenkan_sen + kijun_sen) / 2).shift(26)
-    
-    # Senkou Span B (Leading Span B)
-    senkou_span_b = ((df["High"].rolling(window=52).max() + df["Low"].rolling(window=52).min()) / 2).shift(26)
-    
-    # Chikou Span (Lagging Span)
-    chikou_span = df["Close"].shift(-26)
-    
-    # Собираем все линии в словарь
-    ichimoku = {
+    senkou_span_b = _midpoint(df_sorted["High"], df_sorted["Low"], 52).shift(26)
+    chikou_span = df_sorted["Close"].shift(-26)
+
+    return {
         "Tenkan-sen": tenkan_sen,
         "Kijun-sen": kijun_sen,
         "Senkou Span A": senkou_span_a,
         "Senkou Span B": senkou_span_b,
-        "Chikou Span": chikou_span
+        "Chikou Span": chikou_span,
     }
-    
-    return ichimoku
+
+
+def compute_alligator(df: pd.DataFrame) -> dict:
+    """Индикатор Аллигатор (челюсти/зубы/губы) по медианной цене."""
+    df_sorted = df.sort_index()
+    median_price = (df_sorted["High"] + df_sorted["Low"]) / 2
+
+    def _smoothed(series: pd.Series, period: int) -> pd.Series:
+        return series.ewm(span=period, adjust=False).mean()
+
+    jaw = _smoothed(median_price, 13).shift(8)
+    teeth = _smoothed(median_price, 8).shift(5)
+    lips = _smoothed(median_price, 5).shift(3)
+
+    return {"Jaw": jaw, "Teeth": teeth, "Lips": lips}
 
 
 # ---------------- GUI ---------------- #
@@ -388,8 +400,11 @@ class MplCanvas(FigureCanvas):
     def __init__(self, parent=None):
         fig = Figure(figsize=(10, 6))
         self.figure = fig
-        self.axes_main = fig.add_axes([0.05, 0.35, 0.9, 0.6])
-        self.axes_rsi = fig.add_axes([0.05, 0.1, 0.9, 0.2], sharex=self.axes_main)
+        self.axes_main = fig.add_axes([0.05, 0.42, 0.9, 0.55])
+        self.axes_alligator = fig.add_axes(
+            [0.05, 0.23, 0.9, 0.15], sharex=self.axes_main
+        )
+        self.axes_rsi = fig.add_axes([0.05, 0.05, 0.9, 0.13], sharex=self.axes_main)
         super().__init__(fig)
         self.setParent(parent)
 
@@ -543,7 +558,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.statusBar().showMessage("Ошибка загрузки данных")
 
     def draw_chart(self, highlight_key: Optional[str] = None):
-        """Рисуем свечи + RSI + Ишимоку. При необходимости подсвечиваем паттерны."""
+        """Рисуем свечи + RSI + Аллигатор/Ишимоку. При необходимости подсвечиваем паттерны."""
         if self.df is None:
             return
 
@@ -551,9 +566,11 @@ class MainWindow(QtWidgets.QMainWindow):
         df = self.df.tail(180).copy()
 
         ax_main = self.canvas.axes_main
+        ax_alligator = self.canvas.axes_alligator
         ax_rsi = self.canvas.axes_rsi
 
         ax_main.clear()
+        ax_alligator.clear()
         ax_rsi.clear()
 
         # свечи
@@ -570,25 +587,75 @@ class MainWindow(QtWidgets.QMainWindow):
         ax_main.grid(True)
 
         xleft, xright = ax_main.get_xlim()
+        x_index = df.index
 
         # RSI
         rsi = df["RSI"]
-        x = np.arange(len(df))
-        ax_rsi.plot(x, rsi.values, linewidth=1)
+        ax_rsi.plot(x_index, rsi.values, linewidth=1)
         ax_rsi.axhline(70, linestyle="--", linewidth=0.8)
         ax_rsi.axhline(30, linestyle="--", linewidth=0.8)
         ax_rsi.set_ylabel("RSI")
         ax_rsi.grid(True)
         ax_rsi.set_xlim(xleft, xright)
 
+        # Аллигатор
+        alligator = pd.DataFrame(compute_alligator(df)).reindex(df.index)
+        ax_alligator.plot(x_index, alligator["Jaw"], label="Jaw (13, +8)", color="blue")
+        ax_alligator.plot(
+            x_index, alligator["Teeth"], label="Teeth (8, +5)", color="red"
+        )
+        ax_alligator.plot(
+            x_index, alligator["Lips"], label="Lips (5, +3)", color="green"
+        )
+        ax_alligator.set_ylabel("Alligator")
+        ax_alligator.grid(True)
+        ax_alligator.legend(loc="upper left", fontsize=8)
+        ax_alligator.set_xlim(xleft, xright)
+
         # Отображаем Ишимоку, если выбран
         if self.display_ichimoku:
             ichimoku = compute_ichimoku(df)
-            ax_main.plot(df.index, ichimoku["Tenkan-sen"], label="Tenkan-sen", color='blue')
-            ax_main.plot(df.index, ichimoku["Kijun-sen"], label="Kijun-sen", color='red')
-            ax_main.plot(df.index, ichimoku["Senkou Span A"], label="Senkou Span A", color='green')
-            ax_main.plot(df.index, ichimoku["Senkou Span B"], label="Senkou Span B", color='orange')
-            ax_main.plot(df.index, ichimoku["Chikou Span"], label="Chikou Span", color='purple')
+            ichimoku_df = pd.DataFrame(ichimoku).reindex(df.index)
+
+            tenkan = ichimoku_df["Tenkan-sen"]
+            kijun = ichimoku_df["Kijun-sen"]
+            span_a = ichimoku_df["Senkou Span A"]
+            span_b = ichimoku_df["Senkou Span B"]
+            chikou = ichimoku_df["Chikou Span"]
+
+            ax_main.plot(df.index, tenkan, label="Tenkan-sen", color="blue", linewidth=1.1)
+            ax_main.plot(df.index, kijun, label="Kijun-sen", color="red", linewidth=1.1)
+
+            valid_mask = ~(span_a.isna() | span_b.isna())
+            bull_mask = valid_mask & (span_a >= span_b)
+            bear_mask = valid_mask & (span_a < span_b)
+
+            ax_main.fill_between(
+                df.index,
+                span_a,
+                span_b,
+                where=bull_mask,
+                color="#F0B27A",
+                alpha=0.35,
+                interpolate=True,
+                label="Kumo (A>B)",
+            )
+            ax_main.fill_between(
+                df.index,
+                span_a,
+                span_b,
+                where=bear_mask,
+                color="#BB8FCE",
+                alpha=0.35,
+                interpolate=True,
+                label="Kumo (B>A)",
+            )
+
+            ax_main.plot(df.index, span_a, label="Senkou Span A", color="green", linewidth=1)
+            ax_main.plot(df.index, span_b, label="Senkou Span B", color="orange", linewidth=1)
+            ax_main.plot(df.index, chikou, label="Chikou Span", color="purple", linewidth=1)
+
+            ax_main.legend(loc="upper left")
 
         # ---- отфильтрованные по видимому участку паттерны ----
         visible_index = df.index
