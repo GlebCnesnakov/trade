@@ -379,21 +379,6 @@ def compute_ichimoku(df: pd.DataFrame) -> dict:
     }
 
 
-def compute_alligator(df: pd.DataFrame) -> dict:
-    """Индикатор Аллигатор (челюсти/зубы/губы) по медианной цене."""
-    df_sorted = df.sort_index()
-    median_price = (df_sorted["High"] + df_sorted["Low"]) / 2
-
-    def _smoothed(series: pd.Series, period: int) -> pd.Series:
-        return series.ewm(span=period, adjust=False).mean()
-
-    jaw = _smoothed(median_price, 13).shift(8)
-    teeth = _smoothed(median_price, 8).shift(5)
-    lips = _smoothed(median_price, 5).shift(3)
-
-    return {"Jaw": jaw, "Teeth": teeth, "Lips": lips}
-
-
 # ---------------- GUI ---------------- #
 
 class MplCanvas(FigureCanvas):
